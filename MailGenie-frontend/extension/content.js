@@ -396,7 +396,6 @@ async function generateReply(emailContent, tone, language) {
     return response.text();
 }
 
-
 function createActionButtons(generatedText, composeBox, charCounter, aiButton) {
     const actionContainer = document.createElement("div");
     actionContainer.style.display = "flex";

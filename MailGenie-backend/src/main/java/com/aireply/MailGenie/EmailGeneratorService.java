@@ -1,16 +1,18 @@
 package com.aireply.MailGenie;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.List;
 import java.util.Map;
 
 @Service
 public class EmailGeneratorService {
+
     private final WebClient webClient;
+
     @Value("${gemini.api.url}")
     private String geminiApiUrl;
 
@@ -21,48 +23,72 @@ public class EmailGeneratorService {
         this.webClient = webClientBuilder.build();
     }
 
-    public String generateEmailReply(EmailRequest emailRequest) {
-        String prompt = buildPrompt(emailRequest);
+    public String generateEmailReply(EmailRequest req) {
+
+        String prompt = buildPrompt(req);
+
         Map<String, Object> requestBody = Map.of(
-                "contents", new Object[]{
-                        Map.of("parts", new Object[]{
-                                Map.of("text", prompt),
-                        })
-                }
+                "contents", List.of(
+                        Map.of("parts", List.of(
+                                Map.of("text", prompt)
+                        ))
+                )
         );
-        String response = webClient.post()
-                .uri(geminiApiUrl + "?key=" + geminiApiKey) // FIXED: API key as query param
-                .header("Content-Type", "application/json")
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-        return extractResponseContent(response);
+
+        try {
+            String response = webClient.post()
+                    .uri(geminiApiUrl + "?key=" + geminiApiKey)
+                    .header("Content-Type", "application/json")
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            return extractResponseContent(response);
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return "Error generating email: " + ex.getMessage();
+        }
     }
 
     private String extractResponseContent(String response) {
         try {
             ObjectMapper mapper = new ObjectMapper();
-            JsonNode rootNode = mapper.readTree(response);
-            return rootNode.path("candidates")
+            JsonNode root = mapper.readTree(response);
+
+            return root.path("candidates")
                     .get(0)
                     .path("content")
                     .path("parts")
                     .get(0)
                     .path("text")
                     .asText();
-        } catch (Exception ex) {
-            return "Error Processing Request: " + ex.getMessage();
+
+        } catch (Exception e) {
+            return "Error parsing response: " + e.getMessage() + "\nRaw: " + response;
         }
     }
 
-    private String buildPrompt(EmailRequest emailRequest) {
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("Generate a professional email reply for the following email content and please don't generate a subject line:\n");
-        if (emailRequest.getTone() != null && !emailRequest.getTone().isEmpty()) {
-            prompt.append("Use a ").append(emailRequest.getTone()).append(" tone for the following email content:\n");
-        }
-        prompt.append("\nOriginal email content:\n").append(emailRequest.getEmailContent());
-        return prompt.toString();
+    private String buildPrompt(EmailRequest req) {
+
+        String tone = req.getTone() != null ? req.getTone() : "professional";
+        String lang = req.getLanguage() != null ? req.getLanguage() : "en";
+
+        return """
+                You are an expert email writer AI.
+
+                TASK:
+                Generate a reply email based on the following content.
+                Do NOT include any subject line.
+                The reply must be written in the language: %s.
+                The reply tone must be: %s.
+                Keep the reply clean, natural, and human-like.
+
+                EMAIL CONTENT:
+                %s
+
+                """.formatted(lang, tone, req.getEmailContent());
     }
 }
+
